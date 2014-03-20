@@ -22,12 +22,13 @@ TOKEN						= False
 SID							= ''
 title1						= NAME
 
+episodes_cache              = None
+episodes_cache_sid			= None
+
 def Start():
 	ObjectContainer.title1 = title1
 	ObjectContainer.art = R(ART)
 
-	DirectoryItem.thumb = R(ICON)
-	VideoItem.thumb = R(ICON)
 	HTTP.CacheTime = CACHE_1HOUR
 	HTTP.Headers['User-Agent'] = USER_AGENT
 	HTTP.Headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
@@ -137,16 +138,15 @@ def Soaps():
 			summary = summary.replace('&quot;','"')
 			fan = 'http://thetvdb.com/banners/fanart/original/'+items['tvdb_id']+'-1.jpg'
 			id = items["sid"]
-			thumb=Function(Thumb, url=poster)
 			dir.add(
-				DirectoryObject(
-					key = Callback(show_seasons, id = id, soap_title = title),
+				TVShowObject(
+					key = Callback(show_seasons, show_id = id, soap_title = title),
+					rating_key = str(id),
 					title = title,
 					summary = summary,
 					art = fan,
-					rating = rating,
-					infoLabel = '',
-					thumb = thumb
+					rating = float(rating),
+					thumb = Resource.ContentsOfURLWithFallback(url=poster)
 				)
 			)
 		return dir
@@ -183,13 +183,15 @@ def Watching():
 			summary = summary.replace('&quot;','"')
 			fan = 'http://thetvdb.com/banners/fanart/original/'+items['tvdb_id']+'-1.jpg'
 			id = items["sid"]
-			thumb=Function(Thumb, url=poster)
 			dir.add(
-				DirectoryObject(
-					key = Callback(show_seasons, id = id, soap_title = title),
+				TVShowObject(
+					key = Callback(show_seasons, show_id = id, soap_title = title),
+					rating_key = str(id),
 					title = title,
 					summary = summary,
-					art = fan
+					art = fan,
+					rating = float(rating),
+					thumb = Resource.ContentsOfURLWithFallback(url=poster)
 				)
 			)
 		return dir
@@ -222,7 +224,7 @@ def Unwatched():
 			if items["unwatched"]!=None:
 				#Log.Debug('#####'+str(items).encode('utf-8')+'#####')
 				soap_title = items["title"]
-				title = items["title"]+ " (" +str(items["unwatched"])+ ")"
+				title = items["title"]
 				summary = items["description"]
 				poster = 'http://covers.s4me.ru/soap/big/'+items["sid"]+'.jpg'
 				rating = items["imdb_rating"]
@@ -231,7 +233,7 @@ def Unwatched():
 				id = items["sid"]
 				dir.add(
 					TVShowObject(
-						key = Callback(show_seasons, id = id, soap_title = soap_title, unwatched = True),
+						key = Callback(show_seasons, show_id = id, soap_title = soap_title, unwatched = 1),
 						title = title,
 						summary = summary,
 						art = fan,
@@ -242,48 +244,76 @@ def Unwatched():
 				)
 		return dir
 
+def format_episode_list(show_id):
+	global episodes_cache_sid, episodes_cache
+	if episodes_cache_sid == show_id:
+		return episodes_cache
+
+	data = GET(API_URL + 'episodes/' + show_id)
+
+	show_tree = {}
+	for row in data:
+		if not row['season'] in show_tree:
+			show_tree[row['season']] = {
+				'episodes': {},
+				'id': row['season_id']
+			}
+
+		if not row['episode'] in show_tree[row['season']]['episodes']:
+			show_tree[row['season']]['episodes'][row['episode']] = {
+				'spoiler': row['spoiler'],
+				'title_en': row['title_en'],
+				'watched': row['watched'],
+				'files': [
+					{
+						'id': row['eid'],
+						'title_ru': row['title_ru'],
+						'hash': row['hash'],
+						'translate': row['translate'],
+						'quality': row['quality']
+					}
+				]
+			}
+		else:
+			ep = show_tree[row['season']]['episodes'][row['episode']]
+			ep['watched'] = max(ep['watched'], row['watched'])
+			ep['files'].append(
+					{
+						'id': row['eid'],
+						'title_ru': row['title_ru'],
+						'hash': row['hash'],
+						'translate': row['translate'],
+						'quality': row['quality']
+					}
+				)
+
+	episodes_cache_sid = show_id
+	episodes_cache = show_tree
+
+	return show_tree
+
 @route("/video/soap4me/show_seasons")
-def show_seasons(id, soap_title, unwatched = False):
+def show_seasons(show_id, soap_title, unwatched = 0):
 
 	dir = ObjectContainer(
 		title2 = soap_title,
 		content = ContainerContent.Seasons
 	)
-	url = API_URL + 'episodes/'+id
-	data = GET(url)
-	season = {}
-	useason = {}
-	#Log.Debug('?????'+str(data).encode('utf-8')+'?????')
+	seasons = format_episode_list(show_id)
+	unwatched_data = {x: min([int(v['episodes'][y]['watched'] != None) for y in seasons[x]['episodes']]) for x, v in seasons.items()}
 
-	if unwatched:
-		for episode in data:
-			if episode['watched'] == None:
-				#Log.Debug(str(episode['episode']))
-				if int(episode['season']) not in season:
-					season[int(episode['season'])] = episode['season_id']
-				if int(episode['season']) not in useason.keys():
-					useason[int(episode['season'])] = []
-					useason[int(episode['season'])].append(int(episode['episode']))
-				elif int(episode['episode']) not in useason[int(episode['season'])]:
-					useason[int(episode['season'])].append(int(episode['episode']))
-	else:
-		for episode in data:
-			if int(episode['season']) not in season:
-				season[int(episode['season'])] = episode['season_id']
-
-	#Log.Debug(str(useason))
-
-	for row in season:
-		#info = {}
-		title = "Season %s" % (str(row))
+	for row in sorted(seasons):
+		if unwatched and unwatched_data[row] > 0:
+			continue
 		season_id = str(row)
-		poster = "http://covers.s4me.ru/season/big/%s.jpg"%season[row]
+		title = "Season %s" % (season_id)
+		poster = "http://covers.s4me.ru/season/big/%s.jpg" % seasons[row]['id']
 		dir.add(
 			SeasonObject(
-				key = Callback(show_episodes, sid = id, season = season_id, unwatched = unwatched),
+				key = Callback(show_episodes, show_id = show_id, season = season_id, unwatched = unwatched, soap_title = soap_title),
 				title = title,
-				index = row,
-				rating_key = str(id) + '_' + season_id,
+				index = int(row),
+				rating_key = 'season_' + seasons[row]['id'],
 				show = soap_title,
                 thumb = Resource.ContentsOfURLWithFallback(url=poster),
 			)
@@ -291,97 +321,96 @@ def show_seasons(id, soap_title, unwatched = False):
 	return dir
 
 @route("/video/soap4me/show_episodes")
-def show_episodes(sid, season, unwatched = False):
+def show_episodes(show_id, season, soap_title, unwatched = 0):
 	dir = ObjectContainer(
 		title2 = u'список эпизодов',
 		content = ContainerContent.Episodes
 	)
-	url = API_URL + 'episodes/'+sid
-	data = GET(url)
-	quality = Prefs["quality"]
-	#episode_names = {}
-	show_only_hd = False
 
-	if quality == "HD":
-		for episode in data:
-			if season == episode['season']:
-				if episode['quality'] == '720p':
-					show_only_hd = True
-					break
-	Log(data)
-	for row in data:
-		if season == row['season']:
-
-			if quality == "HD" and show_only_hd == True and row['quality'] != '720p':
-				continue
-			elif quality == "SD" and show_only_hd == False and row['quality'] != 'SD':
-				continue
-			else:
-				if row['watched'] != None and unwatched:
-					continue
-				else:
-					eid = row["eid"]
-					ehash = row['hash']
-					sid = row['sid']
-					title = row['title_en'].encode('utf-8').replace('&#039;', "'").replace("&amp;", "&").replace('&quot;','"')
-					poster = "http://covers.s4me.ru/season/big/%s.jpg"%row['season_id']
-					summary = row['spoiler']
-					dir.add(
-						EpisodeObject(
-							key = Callback(play_video, eid = eid, sid = sid, ehash = ehash),
-							rating_key = ehash,
-					        title = title,
-					        thumb = Resource.ContentsOfURLWithFallback(url=poster),
-					        summary = summary
-						)
-					)
+	show_tree = format_episode_list(show_id)
+	
+	seasons_lengths = [len(show_tree[str(x)]['episodes']) for x in range(1, int(season) - 1)]
+	episodes_cnt = reduce(lambda a, b: a + b, seasons_lengths, 0)
+	
+	for episode in sorted(show_tree[season]['episodes']):
+		row = show_tree[season]['episodes'][episode]
+		if row['watched'] != None and int(unwatched) == 1:
+			continue
+		else:
+			title = row['title_en'].encode('utf-8').replace('&#039;', "'").replace("&amp;", "&").replace('&quot;','"')
+			poster = "http://covers.s4me.ru/season/big/%s.jpg" % show_tree[season]['id']
+			dir.add(
+				EpisodeObject(
+					key = Callback(play_video, show_id = show_id, season = season, episode = episode, soap_title = soap_title),
+					rating_key = 'episode_' + str(show_id) + '_' + str(season) + '_' + str(episode),
+			        title = title,
+			        show = soap_title,
+			        index = int(episode)
+				)
+			)
 
 	return dir
 
 @route("/video/soap4me/play_video")
-def play_video(sid, eid, ehash):
-	token = Dict['token']
+def play_video(show_id, season, episode, soap_title, translation = None):
+	show_tree = format_episode_list(show_id)
 
+	info = show_tree[season]['episodes'][episode]
+	season_id = show_tree[season]['id']
+
+	poster = "http://covers.s4me.ru/season/big/%s.jpg" % season_id
+
+	media_objects = []
+
+	for i in info['files']:
+		q = i['quality'].lower().rstrip('p')
+
+		media_objects.append(MediaObject(
+			parts = [
+				PartObject(
+					key = Callback(get_video_link, sid = show_id, eid = i['id'], ehash = i['hash'])
+				)
+			],
+			video_codec = VideoCodec.H264,
+			audio_codec = AudioCodec.AAC,
+			container = Container.MP4,
+			optimized_for_streaming = True,
+			video_resolution = q
+		))
+
+	return ObjectContainer(
+		title1 = soap_title,
+		title2 = u'список эпизодов',
+		content = ContainerContent.Episodes,
+		objects = [
+			EpisodeObject(
+				key = Callback(play_video, show_id = show_id, season = season, episode = episode, soap_title = soap_title),
+				rating_key = 'episode_' + str(show_id) + '_' + str(season) + '_' + str(episode),
+				summary = info['spoiler'],
+				title = info['title_en'],
+				show = soap_title,
+				season = int(season),
+				index = int(episode),
+				thumb = Resource.ContentsOfURLWithFallback(url=poster),
+		        items = media_objects
+			)
+		]
+	)
+
+def get_video_link(eid, sid, ehash):
+	token = Dict['token']
 	myhash = hashlib.md5(str(token)+str(eid)+str(sid)+str(ehash)).hexdigest()
 	params = {"what": "player", "do": "load", "token":token, "eid":eid, "hash":myhash}
 
 	try:
 		data = JSON.ObjectFromURL("http://soap4.me/callback/", params, headers = {'x-api-token': Dict['token'], 'Cookie': 'PHPSESSID='+Dict['sid']})
 		if data["ok"] == 1:
-			return ObjectContainer(
-				title2 = u'список эпизодов',
-				content = ContainerContent.Episodes,
-				objects = [
-					EpisodeObject(
-						key = Callback(play_video, eid = eid, sid = sid, ehash = ehash),
-						rating_key = ehash,
-						summary = "summary",
-						title = "title",
-						show = "show",
-						absolute_index = 13,
-				        items = [
-				        	MediaObject(
-								parts = [
-									PartObject(
-										key = "http://%s.soap4.me/%s/%s/%s/" % (data['server'], token, eid, myhash)
-									)
-								],
-								video_codec = VideoCodec.H264,
-								audio_codec = AudioCodec.AAC,
-								container = Container.MP4
-				    		)
-				        ]
-					)
-				]
-			)
+			return Redirect("http://%s.soap4.me/%s/%s/%s/" % (data['server'], token, eid, myhash))
 		else:
 			Log(data)
 			return None
 	except Exception as e:
-		return MessageContainer(
-			u"Ошибка",
-			e
-		)
+		return ObjectContainer(header=u"Ошибка", message=e)
 
 def GET(url):
 	return JSON.ObjectFromURL(url, headers = {'x-api-token': Dict['token']}, cacheTime = 0)

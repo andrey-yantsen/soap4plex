@@ -11,13 +11,5 @@
         "label": "Пароль",
         "default": "",
         "option": "hidden"
-    },
-    {
-        "id": "quality",
-        "type": "text",
-        "label": "Предпочитаемое качество",
-        "default": "SD",
-        "values": ["SD","HD","SD+HD"],
-        "type": "enum"
     }
 ]
