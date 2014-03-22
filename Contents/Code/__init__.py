@@ -364,11 +364,17 @@ def show_episode(show_id, season, episode, soap_title, translation = None):
 
 	for i in info['files']:
 		q = i['quality'].lower().rstrip('p')
+		lang = Locale.Language.English if not i['translate'] else Locale.Language.Russian
 
 		media_objects.append(MediaObject(
 			parts = [
 				PartObject(
-					key = Callback(get_video_link, sid = show_id, eid = i['id'], ehash = i['hash'])
+					key = Callback(play_video, sid = show_id, eid = i['id'], ehash = i['hash']),
+					streams = [
+						AudioStreamObject(
+							language_code = lang
+						)
+					]
 				)
 			],
 			video_codec = VideoCodec.H264,
