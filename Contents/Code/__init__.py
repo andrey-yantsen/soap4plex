@@ -341,7 +341,7 @@ def show_episodes(show_id, season, soap_title, unwatched = 0):
 			poster = "http://covers.s4me.ru/season/big/%s.jpg" % show_tree[season]['id']
 			dir.add(
 				EpisodeObject(
-					key = Callback(play_video, show_id = show_id, season = season, episode = episode, soap_title = soap_title),
+					key = Callback(show_episode, show_id = show_id, season = season, episode = episode, soap_title = soap_title),
 					rating_key = 'episode_' + str(show_id) + '_' + str(season) + '_' + str(episode),
 			        title = title,
 			        show = soap_title,
@@ -351,8 +351,8 @@ def show_episodes(show_id, season, soap_title, unwatched = 0):
 
 	return dir
 
-@route("/video/soap4me/play_video")
-def play_video(show_id, season, episode, soap_title, translation = None):
+@route("/video/soap4me/show_episode")
+def show_episode(show_id, season, episode, soap_title, translation = None):
 	show_tree = format_episode_list(show_id)
 
 	info = show_tree[season]['episodes'][episode]
@@ -384,7 +384,7 @@ def play_video(show_id, season, episode, soap_title, translation = None):
 		content = ContainerContent.Episodes,
 		objects = [
 			EpisodeObject(
-				key = Callback(play_video, show_id = show_id, season = season, episode = episode, soap_title = soap_title),
+				key = Callback(show_episode, show_id = show_id, season = season, episode = episode, soap_title = soap_title),
 				rating_key = 'episode_' + str(show_id) + '_' + str(season) + '_' + str(episode),
 				summary = info['spoiler'],
 				title = info['title_en'],
@@ -397,7 +397,7 @@ def play_video(show_id, season, episode, soap_title, translation = None):
 		]
 	)
 
-def get_video_link(eid, sid, ehash):
+def play_video(eid, sid, ehash):
 	token = Dict['token']
 	myhash = hashlib.md5(str(token)+str(eid)+str(sid)+str(ehash)).hexdigest()
 	params = {"what": "player", "do": "load", "token":token, "eid":eid, "hash":myhash}
